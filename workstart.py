@@ -81,7 +81,7 @@ def finderEApteka(page):
             if target:
                 need = target.find('a')
                 if need:
-                    text = need.get('data-name')
+                    text = need.get_text().strip()
                     link = need.get('href')
                     results.append(f"Product: {text}\nLink: https://eapteka.ru{link}")
                 else:
@@ -106,18 +106,23 @@ async def set_pharmacy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Invalid pharmacy name. Please choose 'apteka' or 'eapteka'.")
 
 
+async def select_apteka(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.bot_data['pharmacy'] = 'apteka'
+    await update.message.reply_text("Выбран сайт apteka.ru.")
+
+
+async def select_eapteka(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.bot_data['pharmacy'] = 'eapteka'
+    await update.message.reply_text("Выбран сайт eapteka.ru.")
+
+
 async def find(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = ' '.join(context.args)
     if not query:
-        await update.message.reply_text("Please provide a search term.")
+        await update.message.reply_text("Пожалуйста, укажите поисковый запрос.")
         return
 
-    pharmacy = context.user_data.get('pharmacy', 'apteka')
-    # options = Options()
-    # options.add_argument('--headless')
-    # service = EdgeService()
-    # driver = webdriver.Edge(service=service, options=options)
-
+    pharmacy = context.bot_data.get('pharmacy', 'apteka')
     driver = webdriver.Edge()
 
     try:
@@ -134,12 +139,12 @@ async def find(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     message += f"\n\nМенее подходящие варианты вы можете найти на сайте аптеки по ссылке: {search_url}"
                 await update.message.reply_text(message)
             else:
-                await update.message.reply_text("No results found.")
+                await update.message.reply_text("Ничего не найдено.")
         else:
-            await update.message.reply_text("Failed to fetch the page.")
+            await update.message.reply_text("Не удалось загрузить страницу.")
     except Exception as e:
-        logger.error(f"Error during search process: {e}")
-        await update.message.reply_text("An error occurred while processing your request.")
+        logger.error(f"Ошибка во время поиска: {e}")
+        await update.message.reply_text("Произошла ошибка при обработке вашего запроса.")
     finally:
         driver.quit()
 
@@ -147,7 +152,8 @@ def main():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("find", find))
-    app.add_handler(CommandHandler("set_pharmacy", set_pharmacy))
+    app.add_handler(CommandHandler("selectapteka", select_apteka))
+    app.add_handler(CommandHandler("selecteapteka", select_eapteka))
 
     app.run_polling()
 
