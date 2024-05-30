@@ -1,7 +1,25 @@
 from selenium import webdriver
+from selenium.webdriver.edge.service import Service as EdgeService
+from selenium.webdriver.edge.options import Options
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+import os
+import logging
+from dotenv import load_dotenv
 
+# Установка уровня логирования
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Telegram Bot token
+load_dotenv('api.env')
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+CLASSES_SAVE_PATH = 'classes_from_pages'
+
+if not os.path.exists(CLASSES_SAVE_PATH):
+    os.makedirs(CLASSES_SAVE_PATH)
 
 def took_took(url, driver):
     try:
@@ -24,52 +42,73 @@ def took_took(url, driver):
         write_classes_to_file(all_classes, domain_name)
 
         return soup  # Возвращаем объект BeautifulSoup вместо строки
-
-    finally:
-        pass
-
+    except Exception as e:
+        logger.error(f"Error while processing URL {url}: {e}")
+        return None
 
 def write_classes_to_file(classes, domain_name):
-    filename = f"classes_from_pages/{domain_name}_classes.txt"
-    with open(filename, "w", encoding="utf-8") as file:
-        for cls in sorted(classes):
-            file.write(f"{cls}\n")
-    print(f"Classes have been written to {filename}")
-
-
-def finderEApteka(page):
-    blocks = page.findAll('section', class_='listing-card')
-    for block in blocks:
-        target = block.find('h5', class_='listing-card__title')
-        if target :
-            need = target.find('a')
-            text = need.get_text()
-            print(text)
-
+    filename = os.path.join(CLASSES_SAVE_PATH, f"{domain_name}_classes.txt")
+    try:
+        with open(filename, "w", encoding="utf-8") as file:
+            for cls in sorted(classes):
+                file.write(f"{cls}\n")
+        logger.info(f"Classes have been written to {filename}")
+    except Exception as e:
+        logger.error(f"Error while writing to file {filename}: {e}")
 
 def finderAptekaRu(page):
-    blocks = page.findAll('div', class_='catalog-card')
-    for block in blocks:
-        target = block.find('span', class_='catalog-card__name emphasis')
-        if target :
-            text = target.get("title")
-            print(text)
-            need = block.find('a')
-            link = need.get('href')
-            print(f'Link : https://apteka.ru{link}', '\n')
+    results = []
+    try:
+        blocks = page.findAll('div', class_='catalog-card')
+        for block in blocks:
+            target = block.find('span', class_='catalog-card__name emphasis')
+            if target:
+                text = target.get("title")
+                need = block.find('a')
+                link = need.get('href')
+                results.append(f"Product: {text}\nLink: https://apteka.ru{link}")
+    except Exception as e:
+        logger.error(f"Error while finding products on page: {e}")
+    return results
 
+async def find(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = ' '.join(context.args)
+    if not query:
+        await update.message.reply_text("Please provide a search term.")
+        return
+
+    options = Options()
+    options.add_argument('--headless')
+    service = EdgeService()
+    driver = webdriver.Edge(service=service, options=options)
+
+    try:
+        search_bp = '/omsk/search/?q='
+        aptru_way = 'https://apteka.ru' + search_bp + query
+        aptru = took_took(aptru_way, driver)
+        if aptru:
+            results = finderAptekaRu(aptru)
+            if results:
+                message = "\n\n".join(results[:8])
+                if len(results) > 8:
+                    message += f"\n\nМенее подходящие варианты вы можете найти на сайте аптеки по ссылке: {aptru_way}"
+                await update.message.reply_text(message)
+            else:
+                await update.message.reply_text("No results found.")
+        else:
+            await update.message.reply_text("Failed to fetch the page.")
+    except Exception as e:
+        logger.error(f"Error during search process: {e}")
+        await update.message.reply_text("An error occurred while processing your request.")
+    finally:
+        driver.quit()
+
+def main():
+    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+
+    app.add_handler(CommandHandler("find", find))
+
+    app.run_polling()
 
 if __name__ == "__main__":
-
-    driver = webdriver.Edge()
-
-    elem = 'target'
-    search_bp = '/omsk/search/?q='
-
-    aptru_way = 'https://apteka.ru' + search_bp + elem
-    eapt_way = 'https://www.eapteka.ru' + search_bp + elem
-
-    aptru = took_took(aptru_way, driver)
-    eapt = took_took(eapt_way, driver)
-
-    driver.quit()
+    main()
