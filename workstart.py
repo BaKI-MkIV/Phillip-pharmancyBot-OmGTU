@@ -71,27 +71,67 @@ def finderAptekaRu(page):
         logger.error(f"Error while finding products on page: {e}")
     return results
 
+def finderEApteka(page):
+    results = []
+    try:
+        blocks = page.findAll('section', class_='listing-card')
+        logger.info(f"Found {len(blocks)} listing cards")
+        for block in blocks:
+            target = block.find('h5', class_='listing-card__title')
+            if target:
+                need = target.find('a')
+                if need:
+                    text = need.get('data-name')
+                    link = need.get('href')
+                    results.append(f"Product: {text}\nLink: https://eapteka.ru{link}")
+                else:
+                    logger.warning("Anchor tag not found in listing card title")
+            else:
+                logger.warning("Title tag not found in listing card")
+    except Exception as e:
+        logger.error(f"Error while finding products on page: {e}")
+    return results
+
+
+async def set_pharmacy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Please provide a pharmacy name (apteka or eapteka).")
+        return
+
+    pharmacy = context.args[0].lower()
+    if pharmacy in ('apteka', 'eapteka'):
+        context.user_data['pharmacy'] = pharmacy
+        await update.message.reply_text(f"Pharmacy set to {pharmacy}.")
+    else:
+        await update.message.reply_text("Invalid pharmacy name. Please choose 'apteka' or 'eapteka'.")
+
+
 async def find(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = ' '.join(context.args)
     if not query:
         await update.message.reply_text("Please provide a search term.")
         return
 
-    options = Options()
-    options.add_argument('--headless')
-    service = EdgeService()
-    driver = webdriver.Edge(service=service, options=options)
+    pharmacy = context.user_data.get('pharmacy', 'apteka')
+    # options = Options()
+    # options.add_argument('--headless')
+    # service = EdgeService()
+    # driver = webdriver.Edge(service=service, options=options)
+
+    driver = webdriver.Edge()
 
     try:
         search_bp = '/omsk/search/?q='
-        aptru_way = 'https://apteka.ru' + search_bp + query
-        aptru = took_took(aptru_way, driver)
-        if aptru:
-            results = finderAptekaRu(aptru)
+        base_url = 'https://apteka.ru' if pharmacy == 'apteka' else 'https://www.eapteka.ru'
+        search_url = base_url + search_bp + query
+        page = took_took(search_url, driver)
+
+        if page:
+            results = finderAptekaRu(page) if pharmacy == 'apteka' else finderEApteka(page)
             if results:
                 message = "\n\n".join(results[:8])
                 if len(results) > 8:
-                    message += f"\n\nМенее подходящие варианты вы можете найти на сайте аптеки по ссылке: {aptru_way}"
+                    message += f"\n\nМенее подходящие варианты вы можете найти на сайте аптеки по ссылке: {search_url}"
                 await update.message.reply_text(message)
             else:
                 await update.message.reply_text("No results found.")
@@ -107,8 +147,10 @@ def main():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("find", find))
+    app.add_handler(CommandHandler("set_pharmacy", set_pharmacy))
 
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
